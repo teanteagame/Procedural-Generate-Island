@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 
 namespace TNT
-{
+{   
     public class StructuresGenerator : MonoBehaviour
     {
         public StructureGroup[] groups;
@@ -57,7 +57,7 @@ namespace TNT
                     {
                         if (TryFindValidPosition(group.structureObjects[0], prng, tData, tSize, ctx.occupiedFootprints, gridCells, ref gridIdx, cX, cZ, out Vector3 center, out Quaternion rot, 100))
                         {
-                            SpawnObject(group.structureObjects[0], center, rot, tOrigin, ctx, instanceParent);
+                            SpawnObject(group.structureObjects[0], center, rot, tOrigin, ctx, instanceParent, tData, tSize);
                             spawnCounts[0]++;
                             int absoluteCursor = 1;
                             int currentSubSpawns = 0;
@@ -91,7 +91,7 @@ namespace TNT
                                 {
                                     float angle = (float)prng.NextDouble() * Mathf.PI * 2f;
                                     Vector3 offsetPos = center + new Vector3(Mathf.Cos(angle) * diagonal, 0, Mathf.Sin(angle) * diagonal);
-                                    if (ValidatePosition(subObj, offsetPos, prng, tData, tSize, ctx.occupiedFootprints, out Vector3 finalPos, out Quaternion subRot)) { SpawnObject(subObj, finalPos, subRot, tOrigin, ctx, instanceParent); spawnCounts[sIdx]++; placed = true; break; }
+                                    if (ValidatePosition(subObj, offsetPos, prng, tData, tSize, ctx.occupiedFootprints, out Vector3 finalPos, out Quaternion subRot)) { SpawnObject(subObj, finalPos, subRot, tOrigin, ctx, instanceParent, tData, tSize); spawnCounts[sIdx]++; placed = true; break; }
                                 }
 
                                 if (placed) { currentSubSpawns++; subFails = 0; }
@@ -132,7 +132,7 @@ namespace TNT
 
                             if (TryFindValidPosition(rndObj, prng, tData, tSize, ctx.occupiedFootprints, gridCells, ref gridIdx, cX, cZ, out Vector3 pos, out Quaternion r, 100))
                             {
-                                SpawnObject(rndObj, pos, r, tOrigin, ctx, instanceParent);
+                                SpawnObject(rndObj, pos, r, tOrigin, ctx, instanceParent, tData, tSize);
                                 spawnCounts[sIdx]++;
                                 placed = true;
                             }
@@ -182,21 +182,46 @@ namespace TNT
             Vector2 checkPos = new Vector2(pos.x, pos.z);
             for (int i = 0; i < globalFootprints.Count; i++) if (Vector2.Distance(checkPos, globalFootprints[i].center) < (radius + globalFootprints[i].radius)) return false;
 
-            Vector3 normal = tData.GetInterpolatedNormal(normX, normZ);
-            Quaternion terrainRot = Quaternion.FromToRotation(Vector3.up, normal);
-            float tiltAngle = Quaternion.Angle(Quaternion.identity, terrainRot);
-            if (tiltAngle > 15f) terrainRot = Quaternion.Slerp(Quaternion.identity, terrainRot, 15f / tiltAngle);
+            Quaternion terrainRot = Quaternion.identity;
+            if (!obj.needFlat)
+            {
+                Vector3 normal = tData.GetInterpolatedNormal(normX, normZ);
+                terrainRot = Quaternion.FromToRotation(Vector3.up, normal);
+                float tiltAngle = Quaternion.Angle(Quaternion.identity, terrainRot);
+                if (tiltAngle > 15f) terrainRot = Quaternion.Slerp(Quaternion.identity, terrainRot, 15f / tiltAngle);
+            }
 
             finalRot = terrainRot * Quaternion.Euler(0, (float)prng.NextDouble() * 360f, 0);
             finalPos = new Vector3(pos.x, height + obj.offset, pos.z);
             return true;
         }
 
-        private void SpawnObject(StructureObject obj, Vector3 localPos, Quaternion rot, Vector3 tOrigin, GenerationContext ctx, Transform parentGroup)
+        private void SpawnObject(StructureObject obj, Vector3 localPos, Quaternion rot, Vector3 tOrigin, GenerationContext ctx, Transform parentGroup, TerrainData tData, Vector3 tSize)
         {
             if (obj.structureModel == null) return;
             Instantiate(obj.structureModel, tOrigin + localPos, rot, parentGroup);
-            ctx.occupiedFootprints.Add(new Footprint { center = new Vector2(localPos.x, localPos.z), radius = obj.spaceSize.magnitude * 0.5f });
+            float radius = obj.spaceSize.magnitude * 0.5f;
+            ctx.occupiedFootprints.Add(new Footprint { center = new Vector2(localPos.x, localPos.z), radius = radius });
+
+            if (obj.needFlat)
+            {
+                int res = tData.heightmapResolution;
+                float normX = localPos.x / tSize.x, normZ = localPos.z / tSize.z, targetNormH = (localPos.y - obj.offset) / tSize.y;
+                int r = Mathf.CeilToInt((radius / tSize.x) * res);
+                int cX = Mathf.RoundToInt(normX * (res - 1)), cY = Mathf.RoundToInt(normZ * (res - 1));
+                int sX = Mathf.Max(0, cX - r), sY = Mathf.Max(0, cY - r);
+                int eX = Mathf.Min(res - 1, cX + r), eY = Mathf.Min(res - 1, cY + r);
+                int w = eX - sX + 1, h = eY - sY + 1;
+                float[,] heights = tData.GetHeights(sX, sY, w, h);
+                for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) if ((sX + x - cX) * (sX + x - cX) + (sY + y - cY) * (sY + y - cY) <= r * r) heights[y, x] = targetNormH;
+                tData.SetHeights(sX, sY, heights);
+            }
+
+            if (obj.affectLayer != null)
+            {
+                if (!ctx.sharedData.ContainsKey("LayerMarks")) ctx.sharedData["LayerMarks"] = new List<LayerMark>();
+                ((List<LayerMark>)ctx.sharedData["LayerMarks"]).Add(new LayerMark { center = new Vector2(localPos.x, localPos.z), radius = radius, layer = obj.affectLayer });
+            }
         }
     }
 
@@ -221,5 +246,9 @@ namespace TNT
         public Vector2 angleRange;
         public float offset;
         public int maxCount = 1;
+        public bool needFlat;
+        public TerrainLayer affectLayer;
     }
+
+    public struct LayerMark { public Vector2 center; public float radius; public TerrainLayer layer; }
 }
