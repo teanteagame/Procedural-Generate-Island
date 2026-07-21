@@ -3,6 +3,8 @@ using UnityEngine;
 
 namespace TNT
 {
+    public enum SpawnMode { Fill, Noise }
+
     public class ResourcesGenerator : MonoBehaviour
     {
         public ResourceObject[] resources;
@@ -21,6 +23,9 @@ namespace TNT
             System.Array.Sort(resources, (a, b) => b.priority.CompareTo(a.priority));
             List<ResourceObject> validCandidates = new List<ResourceObject>();
             Dictionary<Vector2Int, Transform> chunks = new Dictionary<Vector2Int, Transform>();
+
+            Vector2[] noiseOffsets = new Vector2[resources.Length];
+            for (int i = 0; i < resources.Length; i++) noiseOffsets[i] = new Vector2(prng.Next(-10000, 10000), prng.Next(-10000, 10000));
 
             Transform masterParent = new GameObject("Resources").transform;
             masterParent.SetParent(transform);
@@ -47,7 +52,14 @@ namespace TNT
 
                         if (h >= res.heightRange.x && h <= res.heightRange.y && s >= res.angleRange.x && s <= res.angleRange.y)
                         {
-                            if (prng.NextDouble() <= res.spawnRate) { validCandidates.Add(res); maxPrio = res.priority; }
+                            bool canSpawn = true;
+                            if (res.mode == SpawnMode.Noise)
+                            {
+                                float noiseVal = Mathf.PerlinNoise((tOrigin.x + jX) * res.noiseScale + noiseOffsets[i].x, (tOrigin.z + jZ) * res.noiseScale + noiseOffsets[i].y);
+                                if (noiseVal < res.noiseThreshold) canSpawn = false;
+                            }
+
+                            if (canSpawn && prng.NextDouble() <= res.spawnRate) { validCandidates.Add(res); maxPrio = res.priority; }
                         }
                     }
 
@@ -83,21 +95,16 @@ namespace TNT
         private void Spawn(ResourceObject res, Vector3 pos, Vector3 normal, Vector3 tOrigin, System.Random prng, GenerationContext ctx, Transform parentGroup)
         {
             if (res.resourceModel == null) return;
-
             Quaternion terrainRot = Quaternion.FromToRotation(Vector3.up, normal);
             float tiltAngle = Quaternion.Angle(Quaternion.identity, terrainRot);
             if (tiltAngle > 15f) terrainRot = Quaternion.Slerp(Quaternion.identity, terrainRot, 15f / tiltAngle);
-
             Quaternion finalRot = terrainRot * Quaternion.Euler(0, (float)prng.NextDouble() * 360f, 0);
-
             float sX = Mathf.Lerp(res.minSize.x, res.maxSize.x, (float)prng.NextDouble());
             float sY = Mathf.Lerp(res.minSize.y, res.maxSize.y, (float)prng.NextDouble());
             float sZ = Mathf.Lerp(res.minSize.z, res.maxSize.z, (float)prng.NextDouble());
-
             pos.y += res.offset;
             GameObject go = Instantiate(res.resourceModel, tOrigin + pos, finalRot, parentGroup);
             go.transform.localScale = new Vector3(sX, sY, sZ);
-
             ctx.occupiedFootprints.Add(new Footprint { center = new Vector2(pos.x, pos.z), radius = res.spaceSize.magnitude * 0.5f });
         }
     }
@@ -106,6 +113,9 @@ namespace TNT
     public class ResourceObject
     {
         public GameObject resourceModel;
+        public SpawnMode mode;
+        public float noiseScale = 0.05f;
+        public float noiseThreshold = 0.5f;
         [Range(0, 1)] public float spawnRate;
         [Range(0, 1)] public float priority = 0.5f;
         public Vector2 spaceSize;
