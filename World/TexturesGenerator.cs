@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -12,40 +12,39 @@ namespace TNT
         {
             if (textures == null || textures.Count == 0) throw new NullReferenceException("Textures list not set or empty");
 
-            TerrainData terrainData = Terrain.activeTerrain.terrainData;
-            TerrainLayer[] layers = new TerrainLayer[textures.Count];
-            for (int i = 0; i < textures.Count; i++) layers[i] = textures[i].layer;
-            terrainData.terrainLayers = layers;
+            TerrainData tData = Terrain.activeTerrain.terrainData;
+            List<TerrainLayer> allLayers = new List<TerrainLayer>();
+            for (int i = 0; i < textures.Count; i++) allLayers.Add(textures[i].layer);
 
-            if (terrainData.alphamapResolution != terrainData.size.x) Debug.LogWarning("terrainData.alphamapResolution must fit terrain size");
+            List<LayerMark> marks = new List<LayerMark>();
+            if (ctx.sharedData.TryGetValue("LayerMarks", out object marksObj)) marks = (List<LayerMark>)marksObj;
+            for (int i = 0; i < marks.Count; i++) if (marks[i].layer != null && !allLayers.Contains(marks[i].layer)) allLayers.Add(marks[i].layer);
 
-            int alphaWidth = terrainData.alphamapWidth;
-            int alphaHeight = terrainData.alphamapHeight;
-            int layerCount = terrainData.alphamapLayers;
-            float[,,] splatmaps = new float[alphaHeight, alphaWidth, layerCount];
+            tData.terrainLayers = allLayers.ToArray();
+            if (tData.alphamapResolution != tData.size.x) Debug.LogWarning("terrainData.alphamapResolution must fit terrain size");
 
-            List<int> validIndices = new List<int>(layerCount);
+            int alphaW = tData.alphamapWidth;
+            int alphaH = tData.alphamapHeight;
+            int layerCount = allLayers.Count;
+            float[,,] splatmaps = new float[alphaH, alphaW, layerCount];
 
-            for (int y = 0; y < alphaHeight; y++)
+            List<int> validIndices = new List<int>(textures.Count);
+
+            for (int y = 0; y < alphaH; y++)
             {
-                for (int x = 0; x < alphaWidth; x++)
+                for (int x = 0; x < alphaW; x++)
                 {
-                    float normX = (float)x / (alphaWidth - 1);
-                    float normY = (float)y / (alphaHeight - 1);
-
-                    float realHeight = terrainData.GetInterpolatedHeight(normX, normY);
-                    float realSteepness = terrainData.GetSteepness(normX, normY);
-
-                    validIndices.Clear();
+                    float normX = (float)x / (alphaW - 1);
+                    float normY = (float)y / (alphaH - 1);
+                    float height = tData.GetInterpolatedHeight(normX, normY);
+                    float steepness = tData.GetSteepness(normX, normY);
                     float maxPriority = -1f;
+                    validIndices.Clear();
 
-                    for (int i = 0; i < layerCount; i++)
+                    for (int i = 0; i < textures.Count; i++)
                     {
                         TerrainTexture tex = textures[i];
-                        bool inHeight = realHeight >= tex.heightRange.x && realHeight <= tex.heightRange.y;
-                        bool inAngle = realSteepness >= tex.angleRange.x && realSteepness <= tex.angleRange.y;
-
-                        if (inHeight && inAngle)
+                        if (height >= tex.heightRange.x && height <= tex.heightRange.y && steepness >= tex.angleRange.x && steepness <= tex.angleRange.y)
                         {
                             if (tex.priority > maxPriority) { maxPriority = tex.priority; validIndices.Clear(); validIndices.Add(i); }
                             else if (Mathf.Approximately(tex.priority, maxPriority)) validIndices.Add(i);
@@ -60,7 +59,32 @@ namespace TNT
                     else splatmaps[y, x, 0] = 1.0f;
                 }
             }
-            terrainData.SetAlphamaps(0, 0, splatmaps);
+
+            for (int i = 0; i < marks.Count; i++)
+            {
+                LayerMark mark = marks[i];
+                if (mark.layer == null) continue;
+                int lIdx = allLayers.IndexOf(mark.layer);
+                if (lIdx == -1) continue;
+
+                float normX = mark.center.x / tData.size.x, normZ = mark.center.y / tData.size.z;
+                int r = Mathf.CeilToInt((mark.radius / tData.size.x) * alphaW);
+                int cX = Mathf.RoundToInt(normX * (alphaW - 1)), cY = Mathf.RoundToInt(normZ * (alphaH - 1));
+                int sX = Mathf.Max(0, cX - r), sY = Mathf.Max(0, cY - r);
+                int eX = Mathf.Min(alphaW - 1, cX + r), eY = Mathf.Min(alphaH - 1, cY + r);
+
+                for (int y = sY; y <= eY; y++)
+                {
+                    for (int x = sX; x <= eX; x++)
+                    {
+                        if ((x - cX) * (x - cX) + (y - cY) * (y - cY) <= r * r)
+                        {
+                            for (int l = 0; l < layerCount; l++) splatmaps[y, x, l] = (l == lIdx) ? 1f : 0f;
+                        }
+                    }
+                }
+            }
+            tData.SetAlphamaps(0, 0, splatmaps);
         }
     }
 
