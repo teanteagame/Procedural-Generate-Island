@@ -21,7 +21,7 @@ namespace TNT
         private TexturesGenerator texturesGenerator;
         private StructuresGenerator structuresGenerator;
         private ResourcesGenerator resourcesGenerator;
-        private DetailsGenerator detailsGenerator;       
+        private DetailsGenerator detailsGenerator;
 
         private void Awake()
         {
@@ -36,14 +36,13 @@ namespace TNT
         {
             int seed = string.IsNullOrEmpty(worldSeed) ? Random.Range(0, 999999) : worldSeed.GetHashCode();
             Random.InitState(seed);
-
             GenerationContext ctx = new GenerationContext { seed = seed };
 
             if (heightsGenerator != null) heightsGenerator.Generate(ctx);
-            if (texturesGenerator != null) texturesGenerator.Generate(ctx);
             if (structuresGenerator != null) structuresGenerator.Generate(ctx);
             if (resourcesGenerator != null) resourcesGenerator.Generate(ctx);
             if (detailsGenerator != null) detailsGenerator.Generate(ctx);
+            if (texturesGenerator != null) texturesGenerator.Generate(ctx);
         }
     }
 }
