@@ -2,7 +2,9 @@ using System.Collections.Generic;
 using UnityEngine;
 
 namespace TNT
-{   
+{
+    public struct LayerMark { public Vector2 center; public float radius; public TerrainLayer layer; }
+
     public class StructuresGenerator : MonoBehaviour
     {
         public StructureGroup[] groups;
@@ -171,6 +173,8 @@ namespace TNT
             finalPos = Vector3.zero; finalRot = Quaternion.identity;
             if (pos.x < 0 || pos.z < 0 || pos.x > tSize.x || pos.z > tSize.z) return false;
 
+            if (obj.radiusRange != Vector2.zero) { float d = Vector2.Distance(new Vector2(pos.x, pos.z), new Vector2(tSize.x * 0.5f, tSize.z * 0.5f)); if (d < obj.radiusRange.x || d > obj.radiusRange.y) return false; }
+
             float normX = pos.x / tSize.x;
             float normZ = pos.z / tSize.z;
             float height = tData.GetInterpolatedHeight(normX, normZ);
@@ -244,11 +248,10 @@ namespace TNT
         public Vector2 spaceSize;
         public Vector2 heightRange;
         public Vector2 angleRange;
+        public Vector2 radiusRange;
         public float offset;
         public int maxCount = 1;
         public bool needFlat;
         public TerrainLayer affectLayer;
     }
-
-    public struct LayerMark { public Vector2 center; public float radius; public TerrainLayer layer; }
 }
